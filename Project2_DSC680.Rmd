@@ -1,0 +1,232 @@
+---
+title: "Project2_DSC680_Mahajan_Nitin"
+output: html_notebook
+---
+
+#Loading the libraries and dataset 
+```{r}
+library(dplyr)
+library(Seurat)
+library(patchwork)
+
+# Load the PBMC dataset
+pbmc.data <- Read10X(data.dir = "/Users/nitin_mahajan/Downloads/filtered_gene_bc_matrices 2/hg19")
+# Initialize the Seurat object with the raw (non-normalized data).
+pbmc <- CreateSeuratObject(counts = pbmc.data, project = "pbmc3k", min.cells = 3, min.features = 200)
+pbmc
+```
+
+# Quality Control and Pre-Processing 
+```{r}
+# The [[ operator can add columns to object metadata. This is a great place to stash QC stats
+pbmc[["percent.mt"]] <- PercentageFeatureSet(pbmc, pattern = "^MT-")
+```
+
+# Visualization of QC Metrics 
+
+# Filter cells that have unique feature counts over 2,500 or less than 200
+# Filter cells that have >5% mitochondrial counts
+```{r}
+VlnPlot(pbmc, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+```
+
+# Feature Feature relationship 
+```{r}
+# FeatureScatter is typically used to visualize feature-feature relationships, but can be used
+# for anything calculated by the object, i.e. columns in object metadata, PC scores etc.
+
+plot1 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "percent.mt")
+plot2 <- FeatureScatter(pbmc, feature1 = "nCount_RNA", feature2 = "nFeature_RNA")
+plot1 + plot2
+```
+
+# Normalizing the data (method “LogNormalize”) 
+
+```{r}
+pbmc <- NormalizeData(pbmc, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+```{r}
+pbmc <- NormalizeData(pbmc)
+```
+
+# Feature Selection (features that exhibit high cell-to-cell variation in the dataset)
+# In this data set we slected the 2,000 features
+# The resulted data will be used for the further data anaysis
+
+```{r}
+pbmc <- FindVariableFeatures(pbmc, selection.method = "vst", nfeatures = 2000)
+
+# Identify the 20 most highly variable genes
+top10 <- head(VariableFeatures(pbmc), 10)
+
+# plot variable features with and without labels
+plot1 <- VariableFeaturePlot(pbmc)
+plot2 <- LabelPoints(plot = plot1, points = top10, repel = TRUE)
+plot1 + plot2
+```
+
+# Scaling the data
+# Using the ScaleData() function,  a linear transformation (‘scaling’) was applied to the dataset. 
+```{r}
+all.genes <- rownames(pbmc)
+pbmc <- ScaleData(pbmc, features = all.genes)
+```
+
+# Dimention Reduction - PCA 
+
+```{r}
+pbmc <- RunPCA(pbmc, features = VariableFeatures(object = pbmc))
+```
+
+
+
+```{r}
+# Examine and visualize PCA results a few different ways
+print(pbmc[["pca"]], dims = 1:5, nfeatures = 5)
+```
+
+
+
+```{r}
+VizDimLoadings(pbmc, dims = 1:2, reduction = "pca")
+```
+
+
+```{r}
+DimPlot(pbmc, reduction = "pca")
+```
+
+
+# Heatmap - Primary sources of heterogeneity in a dataset
+```{r}
+DimHeatmap(pbmc, dims = 1, cells = 500, balanced = TRUE)
+```
+
+
+
+```{r}
+DimHeatmap(pbmc, dims = 1:15, cells = 500, balanced = TRUE)
+```
+
+
+
+```{r}
+# NOTE: This process can take a long time for big datasets, comment out for expediency. More
+# approximate techniques such as those implemented in ElbowPlot() can be used to reduce
+# computation time
+pbmc <- JackStraw(pbmc, num.replicate = 100)
+pbmc <- ScoreJackStraw(pbmc, dims = 1:20)
+```
+
+# Visualization used for comparing the distribution of p-values for each PC with a uniform distribution (dashed line). 
+```{r}
+JackStrawPlot(pbmc, dims = 1:15)
+```
+# ALTERNATIVE METHOD -ELBOW PLOT - A ranking of principle components based on the percentage of variance explained by each one  In this example, we can observe an ‘elbow’ around PC9-10, suggesting that the majority of true signal is captured in the first 10 PCs.
+
+```{r}
+ElbowPlot(pbmc)
+```
+
+
+# Clustering the cells  
+```{r}
+pbmc <- FindNeighbors(pbmc, dims = 1:10)
+pbmc <- FindClusters(pbmc, resolution = 0.5)
+```
+
+
+# Look at cluster IDs of the first 10 cells
+```{r}
+# Look at cluster IDs of the first 5 cells
+head(Idents(pbmc), 10)
+```
+
+# Non-linear dimensional reduction (UMAP/tSNE)
+# The goal of these algorithms is to learn the underlying manifold of the data in order to place similar cells together in 
+# low-dimensional space.
+```{r}
+pbmc <- RunUMAP(pbmc, dims = 1:10)
+```
+
+```{r}
+DimPlot(pbmc, reduction = "umap")
+```
+
+
+# Finding differentially expressed features (cluster biomarkers) in cluster 2 
+# Here I Show top 10 genes/feature differentially expressed with p values and log2 Fold Change 
+
+```{r}
+# find all markers of cluster 2
+cluster2.markers <- FindMarkers(pbmc, ident.1 = 2, min.pct = 0.25)
+head(cluster2.markers, n = 10)
+```
+
+# Comparing one cluster to another one
+# finding all markers distinguishing cluster 5 from clusters 0 and 3
+```{r}
+cluster5.markers <- FindMarkers(pbmc, ident.1 = 5, ident.2 = c(0, 3), min.pct = 0.25)
+head(cluster5.markers, n = 5)
+```
+
+
+# find markers for every cluster compared to all remaining cells, report only the positive ones
+# Filtered by logfc more than 0.25
+```{r}
+pbmc.markers <- FindAllMarkers(pbmc, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+pbmc.markers %>%
+    group_by(cluster) %>%
+    slice_max(n = 2, order_by = avg_log2FC)
+```
+
+
+# Distribution of selected genes in the object
+# One can select the genes of interest and see the expression level in the data set in all the indentfied clusters 
+```{r}
+VlnPlot(pbmc, features = c("MS4A1", "CD79A"))
+```
+
+# Instead of expression level one can also plot the counts
+```{r}
+# you can plot raw counts as well
+VlnPlot(pbmc, features = c("NKG7", "PF4"), slot = "counts", log = TRUE)
+```
+
+# To see the distribution of sleected genes in the all cluster to see the distribution
+```{r}
+FeaturePlot(pbmc, features = c("MS4A1", "GNLY", "CD3E", "CD14", "FCER1A", "FCGR3A", "LYZ", "PPBP",
+    "CD8A"))
+```
+
+
+```{r}
+pbmc.markers %>%
+    group_by(cluster) %>%
+    top_n(n = 10, wt = avg_log2FC) -> top10
+DoHeatmap(pbmc, features = top10$gene) + NoLegend()
+```
+
+# Assigning cell type identity to clusters
+As we have the prior knowlegde of the markers of the cell population, we can name and identify them based on the following makrers
+
+Cluster ID	Markers	Cell Type
+0	IL7R, CCR7	Naive CD4+ T
+1	CD14, LYZ	CD14+ Mono
+2	IL7R, S100A4	Memory CD4+
+3	MS4A1	B
+4	CD8A	CD8+ T
+5	FCGR3A, MS4A7	FCGR3A+ Mono
+6	GNLY, NKG7	NK
+7	FCER1A, CST3	DC
+8	PPBP	Platelet
+
+```{r}
+new.cluster.ids <- c("Naive CD4 T", "CD14+ Mono", "Memory CD4 T", "B", "CD8 T", "FCGR3A+ Mono",
+    "NK", "DC", "Platelet")
+names(new.cluster.ids) <- levels(pbmc)
+pbmc <- RenameIdents(pbmc, new.cluster.ids)
+DimPlot(pbmc, reduction = "umap", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+
